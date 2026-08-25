@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Speed Meter - Mr. HEM</title>
+<style>
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body {
+    font-family:'Segoe UI', Arial, sans-serif; background:linear-gradient(160deg,#0f2027,#203a43,#2c5364);
+    min-height:100vh; color:#fff; padding:16px; display:flex; justify-content:center;
+  }
+  #app { max-width:420px; width:100%; }
+  h1 { font-size:20px; text-align:center; margin-bottom:18px; color:#a9ffcb; }
+
+  #gauge-wrap { display:flex; justify-content:center; margin-bottom:10px; }
+  #gauge {
+    width:220px; height:220px; border-radius:50%;
+    background: conic-gradient(#1db954 0deg, #132b1e 0deg);
+    display:flex; align-items:center; justify-content:center;
+    transition: background 0.25s linear;
+    position:relative;
+  }
+  #gauge::before {
+    content:''; position:absolute; width:180px; height:180px; border-radius:50%; background:#0e1a12;
+  }
+  #gauge-text { position:relative; text-align:center; z-index:2; }
+  #speed-value { font-size:34px; font-weight:700; color:#fff; }
+  #speed-unit { font-size:13px; color:#8fd6a8; }
+  #phase-label { font-size:12px; color:#a9ffcb; margin-top:4px; }
+
+  .card { background:#132b1e; border-radius:16px; padding:16px; margin-bottom:14px; }
+  .stat-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
+  .stat-box { background:#0e1a12; border-radius:10px; padding:12px 6px; text-align:center; }
+  .stat-num { font-size:19px; font-weight:700; color:#a9ffcb; }
+  .stat-label { font-size:11px; color:#8fd6a8; margin-top:2px; }
+
+  #start-btn {
+    width:100%; padding:14px; border:none; border-radius:24px; background:#1db954; color:#fff;
+    font-weight:600; font-size:16px; margin-bottom:14px;
+  }
+  #start-btn:active { background:#159e46; }
+  #start-btn:disabled { background:#2b4636; color:#8fd6a8; }
+
+  #status-msg { text-align:center; font-size:12px; color:#8fd6a8; min-height:16px; margin-bottom:10px; }
+  #footer { text-align:center; font-size:11px; color:#6b8c76; margin-top:8px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>⚡ Network Speed Meter</h1>
+
+  <div id="gauge-wrap">
+    <div id="gauge">
+      <div id="gauge-text">
+        <div id="speed-value">0.0</div>
+        <div id="speed-unit">Mbps</div>
+        <div id="phase-label">Ready</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="status-msg"></div>
+  <button id="start-btn">Start Test</button>
+
+  <div class="card">
+    <div class="stat-grid">
+      <div class="stat-box"><div class="stat-num" id="ping-num">--</div><div class="stat-label">Ping (ms)</div></div>
+      <div class="stat-box"><div class="stat-num" id="download-num">--</div><div class="stat-label">Download</div></div>
+      <div class="stat-box"><div class="stat-num" id="upload-num">--</div><div class="stat-label">Upload</div></div>
+    </div>
+  </div>
+
+  <div id="footer">Mr. HEM / Developed by Mr. HEM — Internet zaroori hai (Cloudflare speed servers use hote hain)</div>
+</div>
+
+<script>
+  const gauge = document.getElementById('gauge');
+  const speedValue = document.getElementById('speed-value');
+  const phaseLabel = document.getElementById('phase-label');
+  const statusMsg = document.getElementById('status-msg');
+  const startBtn = document.getElementById('start-btn');
+
+  const MAX_SCALE = 100; // gauge max Mbps for visual scaling
+
+  function setGauge(mbps) {
+    const pct = Math.min(1, mbps / MAX_SCALE);
+    const deg = pct * 360;
+    gauge.style.background = `conic-gradient(#1db954 ${deg}deg, #132b1e ${deg}deg)`;
+    speedValue.textContent = mbps.toFixed(1);
+  }
+
+  function resetGauge() {
+    setGauge(0);
+  }
+
+  async function measurePing() {
+    phaseLabel.textContent = 'Ping test...';
+    statusMsg.textContent = 'Latency check ho raha hai...';
+    const samples = [];
+    for (let i = 0; i < 5; i++) {
+      const start = performance.now();
+      try {
+        await fetch(`https://speed.cloudflare.com/__down?bytes=0&cachebust=${Date.now()}${i}`, { cache: 'no-store' });
+        samples.push(performance.now() - start);
+      } catch (e) {
+        throw new Error('ping-fail');
+      }
+    }
+    samples.sort((a, b) => a - b);
+    const avg = samples.slice(0, 4).reduce((a, b) => a + b, 0) / Math.max(1, samples.slice(0, 4).length);
+    return Math.round(avg);
+  }
+
+  async function measureDownload() {
+    phaseLabel.textContent = 'Download test...';
+    statusMsg.textContent = 'Download speed measure ho raha hai...';
+    const testBytes = 25 * 1000 * 1000; // 25 MB
+    const url = `https://speed.cloudflare.com/__down?bytes=${testBytes}&cachebust=${Date.now()}`;
+
+    const response = await fetch(url, { cache: 'no-store' });
+    const reader = response.body.getReader();
+    let received = 0;
+    const start = performance.now();
+    let lastUpdate = start;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += value.length;
+      const now = performance.now();
+      if (now - lastUpdate > 150) {
+        const elapsedSec = (now - start) / 1000;
+        const mbps = (received * 8) / elapsedSec / 1_000_000;
+        setGauge(mbps);
+        lastUpdate = now;
+      }
+    }
+    const totalSec = (performance.now() - start) / 1000;
+    const finalMbps = (received * 8) / totalSec / 1_000_000;
+    setGauge(finalMbps);
+    return finalMbps;
+  }
+
+  async function measureUpload() {
+    phaseLabel.textContent = 'Upload test...';
+    statusMsg.textContent = 'Upload speed measure ho raha hai...';
+    const size = 8 * 1000 * 1000; // 8 MB
+    const data = new Uint8Array(size);
+    for (let i = 0; i < size; i += 4096) data[i] = Math.floor(Math.random() * 256);
+
+    const start = performance.now();
+    await fetch('https://speed.cloudflare.com/__up', {
+      method: 'POST',
+      body: data,
+      cache: 'no-store'
+    });
+    const elapsedSec = (performance.now() - start) / 1000;
+    const mbps = (size * 8) / elapsedSec / 1_000_000;
+    setGauge(mbps);
+    return mbps;
+  }
+
+  startBtn.addEventListener('click', async () => {
+    startBtn.disabled = true;
+    startBtn.textContent = 'Testing...';
+    document.getElementById('ping-num').textContent = '--';
+    document.getElementById('download-num').textContent = '--';
+    document.getElementById('upload-num').textContent = '--';
+    resetGauge();
+    statusMsg.textContent = '';
+
+    try {
+      const ping = await measurePing();
+      document.getElementById('ping-num').textContent = ping;
+
+      const download = await measureDownload();
+      document.getElementById('download-num').textContent = download.toFixed(1);
+
+      resetGauge();
+      const upload = await measureUpload();
+      document.getElementById('upload-num').textContent = upload.toFixed(1);
+
+      phaseLabel.textContent = 'Done';
+      statusMsg.textContent = 'Test complete!';
+    } catch (err) {
+      phaseLabel.textContent = 'Error';
+      statusMsg.textContent = 'Test fail ho gaya — internet connection check karo aur dobara try karo.';
+    } finally {
+      startBtn.disabled = false;
+      startBtn.textContent = 'Start Test';
+    }
+  });
+</script>
+</body>
+</html>
